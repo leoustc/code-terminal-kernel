@@ -1,0 +1,89 @@
+{
+  "name": "tmux-persistent-terminals",
+  "displayName": "Persistent tmux Terminals",
+  "description": "Create, reuse, and manage persistent tmux-backed terminals from VS Code.",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./out/extension.js",
+  "categories": [
+    "Other"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "persistentTerminals",
+          "title": "Persistent Terminals",
+          "icon": "media/terminal.svg"
+        }
+      ]
+    },
+    "views": {
+      "persistentTerminals": [
+        {
+          "id": "tmuxSessions",
+          "name": "Sessions"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "tmux.newSession",
+        "title": "New tmux session"
+      },
+      {
+        "command": "tmux.connectSession",
+        "title": "Connect tmux session"
+      },
+      {
+        "command": "tmux.deleteSession",
+        "title": "Delete tmux session"
+      },
+      {
+        "command": "tmux.refresh",
+        "title": "Refresh tmux sessions"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "tmux.newSession",
+          "when": "view == tmuxSessions",
+          "group": "navigation"
+        },
+        {
+          "command": "tmux.refresh",
+          "when": "view == tmuxSessions",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "tmux.connectSession",
+          "when": "view == tmuxSessions && viewItem == tmuxSession",
+          "group": "inline"
+        },
+        {
+          "command": "tmux.deleteSession",
+          "when": "view == tmuxSessions && viewItem == tmuxSession",
+          "group": "inline"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npx tsc -p ./",
+    "compile": "npx tsc -p ./",
+    "watch": "npx tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.3",
+    "vsce": "^2.15.0"
+  }
+}
