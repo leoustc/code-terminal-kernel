@@ -1,4 +1,4 @@
-.PHONY: build save push clean package sync tag
+.PHONY: build save push clean package sync tag release
 
 NODE_BIN := ./node_modules/.bin
 TSC := $(NODE_BIN)/tsc
@@ -32,6 +32,20 @@ tag:
 		exit 1; \
 	fi
 	git tag -a "$(TAG)" -m "$(TAG)"
+
+release: sync
+	@if [ -z "$(TAG)" ]; then \
+		echo "TAG is empty"; \
+		exit 1; \
+	fi
+	git add -A
+	@if git diff --cached --quiet; then \
+		echo "No changes to commit."; \
+	else \
+		git commit -m "$(TAG)"; \
+	fi
+	git tag -a "$(TAG)" -m "$(TAG)"
+	git push --follow-tags
 
 clean:
 	rm -rf node_modules out .vscode-test *.vsix *.tsbuildinfo

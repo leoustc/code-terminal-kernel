@@ -5,7 +5,7 @@
   "displayName": "Terminal Kernel",
   "description": "Create, reuse, and manage persistent terminals from VS Code.",
   "icon": "media/terminal.png",
-  "version": "0.2.2",
+  "version": "0.2.5",
   "repository": {
     "type": "git",
     "url": "https://github.com/leoustc/code-terminal-kernel.git"
