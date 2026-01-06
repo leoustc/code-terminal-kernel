@@ -1,4 +1,4 @@
-.PHONY: build save push clean package sync
+.PHONY: build save push clean package sync tag
 
 NODE_BIN := ./node_modules/.bin
 TSC := $(NODE_BIN)/tsc
@@ -6,6 +6,7 @@ VSCE := $(NODE_BIN)/vsce
 NAME_FILE := NAME
 VERSION_FILE := VERSION
 PKG_JSON := package.json
+TAG ?= v$(shell cat $(VERSION_FILE))
 
 build: npm sync
 	@if [ ! -x "$(TSC)" ]; then \
@@ -23,7 +24,14 @@ save:
 	fi
 
 push:
-	git push
+	git push --follow-tags
+
+tag:
+	@if [ -z "$(TAG)" ]; then \
+		echo "TAG is empty"; \
+		exit 1; \
+	fi
+	git tag -a "$(TAG)" -m "$(TAG)"
 
 clean:
 	rm -rf node_modules out .vscode-test *.vsix *.tsbuildinfo

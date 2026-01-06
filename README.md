@@ -7,7 +7,7 @@ Usage:
 - Press New to create a session
 - Optionally enter a suffix (names become `terminal-<suffix>`, max 8 chars)
 - Click a row to connect
-- Right-click a row to delete
+- Hover a row and click the X to delete
 
 Defaults:
 - If no suffix is provided, sessions are named `terminal-1`, `terminal-2`, ...
@@ -17,4 +17,4 @@ Settings:
 - `terminalKernel.shell`: choose `bash` (default) or `sh`.
 - `terminalKernel.preloadEnvFile`: path to a shell file to source when starting a new session.
 
-Requires a compatible terminal multiplexer installed on the system.
+Requires `tmux` or `screen` installed on the system (based on the backend setting).
