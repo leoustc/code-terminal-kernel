@@ -11,6 +11,8 @@ Usage:
 
 Defaults:
 - If no suffix is provided, sessions are named `terminal-1`, `terminal-2`, ...
+- tmux sessions enable mouse scrolling for easier scrollback.
+- screen sessions set a 10,000-line scrollback buffer (use `Ctrl-a [` to scroll).
 
 Settings:
 - `terminalKernel.backend`: choose `tmux` (default) or `screen`.

@@ -43,7 +43,14 @@ class SectionHeaderItem extends vscode.TreeItem {
   }
 }
 
-class TerminalProvider implements vscode.TreeDataProvider<TerminalItem | ToolItem | SectionHeaderItem> {
+class SpacerItem extends vscode.TreeItem {
+  constructor() {
+    super(' ', vscode.TreeItemCollapsibleState.None);
+    this.contextValue = 'terminalSpacer';
+  }
+}
+
+class TerminalProvider implements vscode.TreeDataProvider<TerminalItem | ToolItem | SectionHeaderItem | SpacerItem> {
   private _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
@@ -51,11 +58,11 @@ class TerminalProvider implements vscode.TreeDataProvider<TerminalItem | ToolIte
     this._onDidChangeTreeData.fire();
   }
 
-  getTreeItem(item: TerminalItem | ToolItem | SectionHeaderItem) {
+  getTreeItem(item: TerminalItem | ToolItem | SectionHeaderItem | SpacerItem) {
     return item;
   }
 
-  getChildren(): Thenable<(TerminalItem | ToolItem | SectionHeaderItem)[]> {
+  getChildren(): Thenable<(TerminalItem | ToolItem | SectionHeaderItem | SpacerItem)[]> {
     const sessions = listSessions();
     try {
       const toolCommands = getToolsConfig()
@@ -63,12 +70,12 @@ class TerminalProvider implements vscode.TreeDataProvider<TerminalItem | ToolIte
         .filter(Boolean);
       const toolItems = toolCommands.map(command => new ToolItem(command));
       const sessionItems = sessions.map(name => new TerminalItem(name));
-      const items: (TerminalItem | ToolItem | SectionHeaderItem)[] = [];
+      const items: (TerminalItem | ToolItem | SectionHeaderItem | SpacerItem)[] = [];
       if (toolItems.length) {
-        items.push(new SectionHeaderItem('Tools'), ...toolItems);
+        items.push(new SpacerItem(), new SectionHeaderItem('Tools'), ...toolItems);
       }
       if (sessionItems.length) {
-        items.push(new SectionHeaderItem('Sessions'), ...sessionItems);
+        items.push(new SpacerItem(), new SectionHeaderItem('Sessions'), ...sessionItems);
       }
       return Promise.resolve(items);
     } catch (err) {
@@ -193,6 +200,7 @@ function createSession(
       `screen -dmS ${session} ${shellCommand}`,
       options
     );
+    configureScreenScrollback(session);
     return;
   }
   execSync(
@@ -236,22 +244,36 @@ function getNextSessionName(prefix: string): string {
 }
 
 function configureTmuxStatus(session: string) {
-  try {
-    const options: Array<[string, string]> = [
-      ['status', 'on'],
-      ['status-interval', '5'],
-      ['status-justify', 'left'],
-      ['status-left-length', '60'],
-      ['status-right-length', '120'],
-      ['status-left', ' #{session_name} #{?client_prefix,[PREFIX] ,}'],
-      ['status-right', ' #{pane_current_command} #{pane_current_path} | #h %Y-%m-%d %H:%M ']
-    ];
-    options.forEach(([key, value]) => {
-      execSync(`tmux set-option -t ${session} ${key} ${shellEscape(value)}`);
-    });
-  } catch {
-    // Ignore tmux styling failures to avoid blocking session creation.
-  }
+  const options: Array<[string, string, 'session' | 'global']> = [
+    ['mouse', 'on', 'global'],
+    ['status', 'on', 'session'],
+    ['status-interval', '5', 'session'],
+    ['status-justify', 'left', 'session'],
+    ['status-left-length', '60', 'session'],
+    ['status-right-length', '120', 'session'],
+    ['status-left', ' #{session_name} #{?client_prefix,[PREFIX] ,}', 'session'],
+    ['status-right', ' #{pane_current_command} #{pane_current_path} | #h %Y-%m-%d %H:%M ', 'session']
+  ];
+  options.forEach(([key, value, scope]) => {
+    try {
+      const target = scope === 'global' ? '-g' : `-t ${session}`;
+      execSync(`tmux set-option ${target} ${key} ${shellEscape(value)}`);
+    } catch {
+      // Ignore tmux styling failures to avoid blocking session creation.
+    }
+  });
+}
+
+function configureScreenScrollback(session: string) {
+  const scrollback = 10000;
+  const commands = [`defscrollback ${scrollback}`, `scrollback ${scrollback}`];
+  commands.forEach(command => {
+    try {
+      execSync(`screen -S ${session} -X ${command}`);
+    } catch {
+      // Ignore screen scrollback failures to avoid blocking session creation.
+    }
+  });
 }
 
 function getToolPrefix(command: string): string {
