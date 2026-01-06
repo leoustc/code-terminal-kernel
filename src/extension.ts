@@ -199,6 +199,7 @@ function createSession(
     `tmux new -d -s ${session} ${shellCommand}`,
     options
   );
+  configureTmuxStatus(session);
 }
 
 function attachSessionCommand(session: string): string {
@@ -231,6 +232,25 @@ function getNextSessionName(prefix: string): string {
     return `${prefix}-${next}`;
   } catch {
     return `${prefix}-1`;
+  }
+}
+
+function configureTmuxStatus(session: string) {
+  try {
+    const options: Array<[string, string]> = [
+      ['status', 'on'],
+      ['status-interval', '5'],
+      ['status-justify', 'left'],
+      ['status-left-length', '60'],
+      ['status-right-length', '120'],
+      ['status-left', ' #{session_name} #{?client_prefix,[PREFIX] ,}'],
+      ['status-right', ' #{pane_current_command} #{pane_current_path} | #h %Y-%m-%d %H:%M ']
+    ];
+    options.forEach(([key, value]) => {
+      execSync(`tmux set-option -t ${session} ${key} ${shellEscape(value)}`);
+    });
+  } catch {
+    // Ignore tmux styling failures to avoid blocking session creation.
   }
 }
 

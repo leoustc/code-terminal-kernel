@@ -16,5 +16,17 @@ Settings:
 - `terminalKernel.backend`: choose `tmux` (default) or `screen`.
 - `terminalKernel.shell`: choose `bash` (default) or `sh`.
 - `terminalKernel.preloadEnvFile`: path to a shell file to source when starting a new session.
+- `terminalKernel.tools`: list of tool commands shown in the Tools view.
+
+Tools example (`settings.json`):
+```json
+{
+  "terminalKernel.tools": [
+    "codex",
+    "python",
+    "npm run lint"
+  ]
+}
+```
 
 Requires `tmux` or `screen` installed on the system (based on the backend setting).
