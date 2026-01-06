@@ -7,6 +7,7 @@ import * as path from 'path';
 
 type Backend = 'tmux' | 'screen';
 type ShellName = 'bash' | 'sh';
+type GroupKey = string;
 
 class TerminalItem extends vscode.TreeItem {
   constructor(public readonly session: string) {
@@ -22,35 +23,27 @@ class TerminalItem extends vscode.TreeItem {
   }
 }
 
-class ToolItem extends vscode.TreeItem {
-  constructor(public readonly commandText: string) {
-    super(commandText, vscode.TreeItemCollapsibleState.None);
-    this.contextValue = 'terminalTool';
-    this.iconPath = new vscode.ThemeIcon('play');
-    this.tooltip = `tool: ${commandText}`;
-    this.command = {
-      command: 'terminalKernel.launchTool',
-      title: 'Run Tool',
-      arguments: [commandText]
-    };
+class GroupItem extends vscode.TreeItem {
+  constructor(
+    public readonly groupName: GroupKey,
+    public readonly commandText: string | undefined,
+    count: number
+  ) {
+    const displayName = capitalizeGroupName(groupName);
+    const hasSessions = count > 0;
+    const state = hasSessions
+      ? vscode.TreeItemCollapsibleState.Expanded
+      : vscode.TreeItemCollapsibleState.Collapsed;
+    super(displayName, state);
+    this.contextValue = 'terminalGroup';
+    this.description = String(count);
+    this.id = `terminalGroup:${groupName}:${count}`;
+    this.collapsibleState = state;
+    this.tooltip = `${displayName} (${count})`;
   }
 }
 
-class SectionHeaderItem extends vscode.TreeItem {
-  constructor(label: string) {
-    super(label, vscode.TreeItemCollapsibleState.None);
-    this.contextValue = 'terminalSection';
-  }
-}
-
-class SpacerItem extends vscode.TreeItem {
-  constructor() {
-    super(' ', vscode.TreeItemCollapsibleState.None);
-    this.contextValue = 'terminalSpacer';
-  }
-}
-
-class TerminalProvider implements vscode.TreeDataProvider<TerminalItem | ToolItem | SectionHeaderItem | SpacerItem> {
+class TerminalProvider implements vscode.TreeDataProvider<TerminalItem | GroupItem> {
   private _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
@@ -58,26 +51,71 @@ class TerminalProvider implements vscode.TreeDataProvider<TerminalItem | ToolIte
     this._onDidChangeTreeData.fire();
   }
 
-  getTreeItem(item: TerminalItem | ToolItem | SectionHeaderItem | SpacerItem) {
+  getTreeItem(item: TerminalItem | GroupItem) {
     return item;
   }
 
-  getChildren(): Thenable<(TerminalItem | ToolItem | SectionHeaderItem | SpacerItem)[]> {
-    const sessions = listSessions();
+  private getToolGroups(): Array<{ name: GroupKey; command: string }> {
+    const seen = new Set<GroupKey>();
+    const groups: Array<{ name: GroupKey; command: string }> = [];
+    getToolsConfig()
+      .map(command => command.trim())
+      .filter(Boolean)
+      .forEach(command => {
+        const name = getToolPrefix(command);
+        if (!name || seen.has(name) || name === 'terminal') return;
+        seen.add(name);
+        groups.push({ name, command });
+      });
+    return groups;
+  }
+
+  private groupSessions(sessions: string[]): Map<GroupKey, string[]> {
+    const grouped = new Map<GroupKey, string[]>();
+    sessions.forEach(session => {
+      const key = getSessionGroupName(session);
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.push(session);
+      } else {
+        grouped.set(key, [session]);
+      }
+    });
+    return grouped;
+  }
+
+  private buildGroupItems(sessionsByGroup: Map<GroupKey, string[]>): GroupItem[] {
+    const items: GroupItem[] = [];
+    const seen = new Set<GroupKey>();
+    const addGroup = (name: GroupKey, commandText?: string) => {
+      if (seen.has(name)) return;
+      seen.add(name);
+      const count = sessionsByGroup.get(name)?.length ?? 0;
+      items.push(new GroupItem(name, commandText, count));
+    };
+
+    addGroup('terminal');
+    this.getToolGroups().forEach(group => addGroup(group.name, group.command));
+    const extra = Array.from(sessionsByGroup.keys()).filter(name => !seen.has(name));
+    extra.sort().forEach(name => addGroup(name, name));
+    return items;
+  }
+
+  getChildren(
+    element?: TerminalItem | GroupItem
+  ): Thenable<(TerminalItem | GroupItem)[]> {
     try {
-      const toolCommands = getToolsConfig()
-        .map(command => command.trim())
-        .filter(Boolean);
-      const toolItems = toolCommands.map(command => new ToolItem(command));
-      const sessionItems = sessions.map(name => new TerminalItem(name));
-      const items: (TerminalItem | ToolItem | SectionHeaderItem | SpacerItem)[] = [];
-      if (toolItems.length) {
-        items.push(new SpacerItem(), new SectionHeaderItem('Tools'), ...toolItems);
+      const sessions = listSessions();
+      if (!element) {
+        const grouped = this.groupSessions(sessions);
+        return Promise.resolve(this.buildGroupItems(grouped));
       }
-      if (sessionItems.length) {
-        items.push(new SpacerItem(), new SectionHeaderItem('Sessions'), ...sessionItems);
+      if (element instanceof GroupItem) {
+        const grouped = this.groupSessions(sessions);
+        const groupSessions = grouped.get(element.groupName) ?? [];
+        return Promise.resolve(groupSessions.map(name => new TerminalItem(name)));
       }
-      return Promise.resolve(items);
+      return Promise.resolve([]);
     } catch (err) {
       vscode.window.showErrorMessage('Unable to list terminals');
       return Promise.resolve([]);
@@ -289,6 +327,16 @@ function getToolPrefix(command: string): string {
   return cleaned || 'tool';
 }
 
+function getSessionGroupName(session: string): GroupKey {
+  const match = /^(.+)-([a-z0-9]+)$/i.exec(session);
+  return match?.[1]?.toLowerCase() || 'terminal';
+}
+
+function capitalizeGroupName(name: string): string {
+  if (!name) return name;
+  return name[0].toUpperCase() + name.slice(1);
+}
+
 function getPreferredCwd(): string | undefined {
   const editor = vscode.window.activeTextEditor;
   if (editor?.document?.uri?.scheme === 'file') {
@@ -323,23 +371,30 @@ export function activate(context: vscode.ExtensionContext) {
   const provider = new TerminalProvider();
   vscode.window.createTreeView('terminalKernelSessions', { treeDataProvider: provider });
 
+  const startSessionWithPrefix = async (prefix: string, initialCommand?: string) => {
+    const suffix = await vscode.window.showInputBox({
+      placeHolder: 'Name suffix (optional)',
+      prompt: `Will be prefixed with ${prefix}-`
+    });
+    if (suffix === undefined) return;
+    const cleaned = suffix.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8);
+    const session = cleaned ? `${prefix}-${cleaned}` : getNextSessionName(prefix);
+    try {
+      const cwd = getPreferredCwd();
+      const envFile = getValidatedEnvFile();
+      if (envFile === null) return;
+      createSession(session, cwd, envFile, initialCommand);
+      provider.refresh();
+    } catch (e) {
+      vscode.window.showErrorMessage(`Failed to create terminal: ${session}`);
+    }
+  };
+
+  const startTerminalSession = async () => startSessionWithPrefix('terminal');
+
   context.subscriptions.push(
     vscode.commands.registerCommand('terminalKernel.newSession', async () => {
-      const suffix = await vscode.window.showInputBox({
-        placeHolder: 'Name suffix (optional)',
-        prompt: 'Will be prefixed with terminal-'
-      });
-      const cleaned = (suffix ?? '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 8);
-      const session = cleaned ? `terminal-${cleaned}` : getNextSessionName('terminal');
-      try {
-        const cwd = getPreferredCwd();
-        const envFile = getValidatedEnvFile();
-        if (envFile === null) return;
-        createSession(session, cwd, envFile);
-        provider.refresh();
-      } catch (e) {
-        vscode.window.showErrorMessage(`Failed to create terminal: ${session}`);
-      }
+      await startTerminalSession();
     })
   );
 
@@ -379,28 +434,25 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
     const prefix = getToolPrefix(trimmed);
-    const suffix = await vscode.window.showInputBox({
-      placeHolder: 'Name suffix (optional)',
-      prompt: `Will be prefixed with ${prefix}-`
-    });
-    if (suffix === undefined) return;
-    const cleaned = suffix.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8);
-    const session = cleaned ? `${prefix}-${cleaned}` : getNextSessionName(prefix);
-    try {
-      const cwd = getPreferredCwd();
-      const envFile = getValidatedEnvFile();
-      if (envFile === null) return;
-      createSession(session, cwd, envFile, trimmed);
-      provider.refresh();
-    } catch (e) {
-      vscode.window.showErrorMessage(`Failed to create terminal: ${session}`);
-    }
+    await startSessionWithPrefix(prefix, trimmed);
   };
 
   context.subscriptions.push(
     vscode.commands.registerCommand('terminalKernel.launchTool', (command: string) =>
       startToolSession(command)
     )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('terminalKernel.newGroupSession', async (item: GroupItem) => {
+      if (!item) return;
+      if (item.groupName === 'terminal') {
+        await startTerminalSession();
+        return;
+      }
+      const command = item.commandText ?? item.groupName;
+      await startToolSession(command);
+    })
   );
 
   context.subscriptions.push(

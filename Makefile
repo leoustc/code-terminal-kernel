@@ -71,6 +71,20 @@ release: sync
 	git push --force-with-lease origin "$(BRANCH)"
 	git push --force origin "$(TAG)"
 
+release: sync
+	@if [ -z "$(TAG)" ]; then \
+		echo "TAG is empty"; \
+		exit 1; \
+	fi
+	git add -A
+	@if git diff --cached --quiet; then \
+		echo "No changes to commit."; \
+	else \
+		git commit -m "$(TAG)"; \
+	fi
+	git tag -a "$(TAG)" -m "$(TAG)"
+	git push --follow-tags
+
 clean:
 	rm -rf node_modules out .vscode-test *.vsix *.tsbuildinfo
 
