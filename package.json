@@ -1,8 +1,15 @@
 {
-  "name": "tmux-persistent-terminals",
-  "displayName": "Persistent tmux Terminals",
-  "description": "Create, reuse, and manage persistent tmux-backed terminals from VS Code.",
-  "version": "0.0.1",
+  "name": "code-terminal-kernel",
+  "publisher": "leoustc",
+  "author": "leoustc",
+  "displayName": "Terminal Kernel",
+  "description": "Create, reuse, and manage persistent terminals from VS Code.",
+  "icon": "media/terminal.png",
+  "version": "0.2.2",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/leoustc/code-terminal-kernel.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -18,7 +25,7 @@
       "activitybar": [
         {
           "id": "persistentTerminals",
-          "title": "Persistent Terminals",
+          "title": "Terminal Kernel",
           "icon": "media/terminal.svg"
         }
       ]
@@ -26,54 +33,83 @@
     "views": {
       "persistentTerminals": [
         {
-          "id": "tmuxSessions",
-          "name": "Sessions"
+          "id": "terminalKernelSessions",
+          "name": "Terminal Kernel"
         }
       ]
     },
     "commands": [
       {
-        "command": "tmux.newSession",
-        "title": "New tmux session"
+        "command": "terminalKernel.newSession",
+        "title": "New"
       },
       {
-        "command": "tmux.connectSession",
-        "title": "Connect tmux session"
+        "command": "terminalKernel.connectSession",
+        "title": "Connect to Terminal"
       },
       {
-        "command": "tmux.deleteSession",
-        "title": "Delete tmux session"
+        "command": "terminalKernel.deleteSession",
+        "title": "Delete"
       },
       {
-        "command": "tmux.refresh",
-        "title": "Refresh tmux sessions"
+        "command": "terminalKernel.refresh",
+        "title": "Refresh"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "tmux.newSession",
-          "when": "view == tmuxSessions",
+          "command": "terminalKernel.newSession",
+          "when": "view == terminalKernelSessions",
           "group": "navigation"
         },
         {
-          "command": "tmux.refresh",
-          "when": "view == tmuxSessions",
+          "command": "terminalKernel.refresh",
+          "when": "view == terminalKernelSessions",
           "group": "navigation"
         }
       ],
       "view/item/context": [
         {
-          "command": "tmux.connectSession",
-          "when": "view == tmuxSessions && viewItem == tmuxSession",
-          "group": "inline"
+          "command": "terminalKernel.connectSession",
+          "when": "view == terminalKernelSessions && viewItem == terminalSession",
+          "group": "context@1"
         },
         {
-          "command": "tmux.deleteSession",
-          "when": "view == tmuxSessions && viewItem == tmuxSession",
-          "group": "inline"
+          "command": "terminalKernel.deleteSession",
+          "when": "view == terminalKernelSessions && viewItem == terminalSession",
+          "group": "inline@3",
+          "icon": "$(close)"
         }
       ]
+    },
+    "configuration": {
+      "title": "Terminal Kernel",
+      "properties": {
+        "terminalKernel.backend": {
+          "type": "string",
+          "default": "tmux",
+          "enum": [
+            "tmux",
+            "screen"
+          ],
+          "description": "Backend used for terminal sessions."
+        },
+        "terminalKernel.shell": {
+          "type": "string",
+          "default": "bash",
+          "enum": [
+            "bash",
+            "sh"
+          ],
+          "description": "Shell used to launch terminal sessions."
+        },
+        "terminalKernel.preloadEnvFile": {
+          "type": "string",
+          "default": "",
+          "description": "Path to a shell file to source when starting a new session."
+        }
+      }
     }
   },
   "scripts": {
@@ -83,7 +119,8 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
     "typescript": "^5.3.3",
-    "vsce": "^2.15.0"
+    "vsce": "^1.97.0"
   }
 }

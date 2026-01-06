@@ -1,10 +1,20 @@
-# Persistent tmux Terminals
+# Terminal Kernel
 
-This extension lets you create and reuse persistent terminals backed by **tmux**.
+Terminal Kernel lets you create and reuse persistent terminals from VS Code.
 
-- Click the sidebar icon
-- Create sessions with the + button
-- Connect to existing ones
-- Delete when done
+Usage:
+- Click the Terminal Kernel icon in the Activity Bar
+- Press New to create a session
+- Optionally enter a suffix (names become `terminal-<suffix>`, max 8 chars)
+- Click a row to connect
+- Hover a row and click the X to delete
 
-Requires tmux installed on the system.
+Defaults:
+- If no suffix is provided, sessions are named `terminal-1`, `terminal-2`, ...
+
+Settings:
+- `terminalKernel.backend`: choose `tmux` (default) or `screen`.
+- `terminalKernel.shell`: choose `bash` (default) or `sh`.
+- `terminalKernel.preloadEnvFile`: path to a shell file to source when starting a new session.
+
+Requires `tmux` or `screen` installed on the system (based on the backend setting).
