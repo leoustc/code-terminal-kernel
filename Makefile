@@ -31,6 +31,9 @@ tag:
 		echo "TAG is empty"; \
 		exit 1; \
 	fi
+	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
+		git tag -d "$(TAG)"; \
+	fi
 	git tag -a "$(TAG)" -m "$(TAG)"
 
 release: sync
@@ -44,7 +47,13 @@ release: sync
 	else \
 		git commit -m "$(TAG)"; \
 	fi
+	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
+		git tag -d "$(TAG)"; \
+	fi
 	git tag -a "$(TAG)" -m "$(TAG)"
+	@if git ls-remote --tags origin "refs/tags/$(TAG)" | grep -q "$(TAG)"; then \
+		git push --delete origin "$(TAG)"; \
+	fi
 	git push --follow-tags
 
 clean:
