@@ -44,6 +44,10 @@
         "title": "New"
       },
       {
+        "command": "terminalKernel.launchTool",
+        "title": "Run Tool"
+      },
+      {
         "command": "terminalKernel.connectSession",
         "title": "Connect to Terminal"
       },
@@ -108,6 +112,16 @@
           "type": "string",
           "default": "",
           "description": "Path to a shell file to source when starting a new session."
+        },
+        "terminalKernel.tools": {
+          "type": "array",
+          "default": [
+            "codex"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "List of tool commands shown in the Tools view. Edit in Settings."
         }
       }
     }

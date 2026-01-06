@@ -22,7 +22,28 @@ class TerminalItem extends vscode.TreeItem {
   }
 }
 
-class TerminalProvider implements vscode.TreeDataProvider<TerminalItem> {
+class ToolItem extends vscode.TreeItem {
+  constructor(public readonly commandText: string) {
+    super(commandText, vscode.TreeItemCollapsibleState.None);
+    this.contextValue = 'terminalTool';
+    this.iconPath = new vscode.ThemeIcon('play');
+    this.tooltip = `tool: ${commandText}`;
+    this.command = {
+      command: 'terminalKernel.launchTool',
+      title: 'Run Tool',
+      arguments: [commandText]
+    };
+  }
+}
+
+class SectionHeaderItem extends vscode.TreeItem {
+  constructor(label: string) {
+    super(label, vscode.TreeItemCollapsibleState.None);
+    this.contextValue = 'terminalSection';
+  }
+}
+
+class TerminalProvider implements vscode.TreeDataProvider<TerminalItem | ToolItem | SectionHeaderItem> {
   private _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
@@ -30,17 +51,25 @@ class TerminalProvider implements vscode.TreeDataProvider<TerminalItem> {
     this._onDidChangeTreeData.fire();
   }
 
-  getTreeItem(item: TerminalItem) {
+  getTreeItem(item: TerminalItem | ToolItem | SectionHeaderItem) {
     return item;
   }
 
-  getChildren(): Thenable<TerminalItem[]> {
+  getChildren(): Thenable<(TerminalItem | ToolItem | SectionHeaderItem)[]> {
     const sessions = listSessions();
-    if (!sessions.length) {
-      return Promise.resolve([]);
-    }
     try {
-      const items = sessions.map(name => new TerminalItem(name));
+      const toolCommands = getToolsConfig()
+        .map(command => command.trim())
+        .filter(Boolean);
+      const toolItems = toolCommands.map(command => new ToolItem(command));
+      const sessionItems = sessions.map(name => new TerminalItem(name));
+      const items: (TerminalItem | ToolItem | SectionHeaderItem)[] = [];
+      if (toolItems.length) {
+        items.push(new SectionHeaderItem('Tools'), ...toolItems);
+      }
+      if (sessionItems.length) {
+        items.push(new SectionHeaderItem('Sessions'), ...sessionItems);
+      }
       return Promise.resolve(items);
     } catch (err) {
       vscode.window.showErrorMessage('Unable to list terminals');
@@ -82,24 +111,39 @@ function getPreloadEnvFile(): string | undefined {
   return resolved;
 }
 
+function getToolsConfig(): string[] {
+  const raw = vscode.workspace
+    .getConfiguration('terminalKernel')
+    .get<unknown>('tools', ['codex']);
+  if (!Array.isArray(raw)) return ['codex'];
+  return raw.map(value => (typeof value === 'string' ? value : String(value ?? '')));
+}
+
 function shellEscape(value: string): string {
   return "'" + value.replace(/'/g, "'\\''") + "'";
 }
 
-function buildShellBootstrap(shell: ShellName, envFile: string): string {
-  const sourceCmd = `. ${shellEscape(envFile)}`;
+function buildShellBootstrap(shell: ShellName, envFile?: string, initialCommand?: string): string {
+  const commands: string[] = [];
+  if (envFile) {
+    commands.push(`. ${shellEscape(envFile)}`);
+  }
+  if (initialCommand) {
+    commands.push(initialCommand);
+  }
   const execCmd = shell === 'bash' ? `exec ${shell} -l` : `exec ${shell}`;
+  commands.push(execCmd);
   const shellFlag = shell === 'bash' ? '-lc' : '-c';
-  const command = `${sourceCmd}; ${execCmd}`;
+  const command = commands.join('; ');
   return `${shell} ${shellFlag} ${shellEscape(command)}`;
 }
 
-function getShellCommand(envFile?: string): string {
+function getShellCommand(envFile?: string, initialCommand?: string): string {
   const shell = getShellName();
-  if (!envFile) {
+  if (!envFile && !initialCommand) {
     return shell === 'bash' ? `${shell} -l` : shell;
   }
-  return buildShellBootstrap(shell, envFile);
+  return buildShellBootstrap(shell, envFile, initialCommand);
 }
 
 function parseTmuxSessions(out: string): string[] {
@@ -135,10 +179,15 @@ function listSessions(): string[] {
   }
 }
 
-function createSession(session: string, cwd?: string, envFile?: string) {
+function createSession(
+  session: string,
+  cwd?: string,
+  envFile?: string,
+  initialCommand?: string
+) {
   const backend = getBackend();
   const options = cwd ? { cwd } : undefined;
-  const shellCommand = getShellCommand(envFile);
+  const shellCommand = getShellCommand(envFile, initialCommand);
   if (backend === 'screen') {
     execSync(
       `screen -dmS ${session} ${shellCommand}`,
@@ -166,19 +215,36 @@ function deleteSession(session: string) {
   execSync(`tmux kill-session -t ${session}`);
 }
 
-function getNextTerminalName(): string {
+function getNextSessionName(prefix: string): string {
   try {
     const used = new Set<number>();
     listSessions().forEach(name => {
-      const match = /^terminal-(\d+)$/.exec(name);
-      if (match) used.add(Number(match[1]));
+      const token = `${prefix}-`;
+      if (!name.startsWith(token)) return;
+      const suffix = Number(name.slice(token.length));
+      if (Number.isInteger(suffix) && suffix > 0) {
+        used.add(suffix);
+      }
     });
     let next = 1;
     while (used.has(next)) next += 1;
-    return `terminal-${next}`;
+    return `${prefix}-${next}`;
   } catch {
-    return 'terminal-1';
+    return `${prefix}-1`;
   }
+}
+
+function getToolPrefix(command: string): string {
+  const trimmed = command.trim();
+  if (!trimmed) return 'tool';
+  const firstToken = trimmed.split(/\s+/)[0];
+  const base = path.basename(firstToken);
+  const cleaned = base
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '');
+  return cleaned || 'tool';
 }
 
 function getPreferredCwd(): string | undefined {
@@ -189,6 +255,26 @@ function getPreferredCwd(): string | undefined {
     return workspaceFolder?.uri.fsPath ?? path.dirname(filePath);
   }
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+function connectToSession(session: string) {
+  const cwd = getPreferredCwd();
+  const term = vscode.window.createTerminal({
+    name: session,
+    shellPath: getShellName(),
+    shellArgs: ['-c', attachSessionCommand(session)],
+    cwd
+  });
+  term.show();
+}
+
+function getValidatedEnvFile(): string | null | undefined {
+  const envFile = getPreloadEnvFile();
+  if (envFile && !fs.existsSync(envFile)) {
+    vscode.window.showErrorMessage(`Preload env file not found: ${envFile}`);
+    return null;
+  }
+  return envFile;
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -202,14 +288,11 @@ export function activate(context: vscode.ExtensionContext) {
         prompt: 'Will be prefixed with terminal-'
       });
       const cleaned = (suffix ?? '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 8);
-      const session = cleaned ? `terminal-${cleaned}` : getNextTerminalName();
+      const session = cleaned ? `terminal-${cleaned}` : getNextSessionName('terminal');
       try {
         const cwd = getPreferredCwd();
-        const envFile = getPreloadEnvFile();
-        if (envFile && !fs.existsSync(envFile)) {
-          vscode.window.showErrorMessage(`Preload env file not found: ${envFile}`);
-          return;
-        }
+        const envFile = getValidatedEnvFile();
+        if (envFile === null) return;
         createSession(session, cwd, envFile);
         provider.refresh();
       } catch (e) {
@@ -221,14 +304,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('terminalKernel.connectSession', async (item: TerminalItem) => {
       if (!item?.session) return;
-      const cwd = getPreferredCwd();
-      const term = vscode.window.createTerminal({
-        name: item.session,
-        shellPath: getShellName(),
-        shellArgs: ['-c', attachSessionCommand(item.session)],
-        cwd
-      });
-      term.show();
+      connectToSession(item.session);
     })
   );
 
@@ -252,6 +328,44 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('terminalKernel.refresh', () => provider.refresh())
+  );
+
+  const startToolSession = async (command: string) => {
+    const trimmed = command.trim();
+    if (!trimmed) {
+      vscode.window.showErrorMessage('Tool command is empty.');
+      return;
+    }
+    const prefix = getToolPrefix(trimmed);
+    const suffix = await vscode.window.showInputBox({
+      placeHolder: 'Name suffix (optional)',
+      prompt: `Will be prefixed with ${prefix}-`
+    });
+    if (suffix === undefined) return;
+    const cleaned = suffix.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8);
+    const session = cleaned ? `${prefix}-${cleaned}` : getNextSessionName(prefix);
+    try {
+      const cwd = getPreferredCwd();
+      const envFile = getValidatedEnvFile();
+      if (envFile === null) return;
+      createSession(session, cwd, envFile, trimmed);
+      provider.refresh();
+    } catch (e) {
+      vscode.window.showErrorMessage(`Failed to create terminal: ${session}`);
+    }
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('terminalKernel.launchTool', (command: string) =>
+      startToolSession(command)
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration(event => {
+      if (!event.affectsConfiguration('terminalKernel.tools')) return;
+      provider.refresh();
+    })
   );
 }
 

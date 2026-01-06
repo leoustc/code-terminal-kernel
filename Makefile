@@ -7,6 +7,7 @@ NAME_FILE := NAME
 VERSION_FILE := VERSION
 PKG_JSON := package.json
 TAG ?= v$(shell cat $(VERSION_FILE))
+BRANCH ?= main
 
 build: npm sync
 	@if [ ! -x "$(TSC)" ]; then \
@@ -41,6 +42,10 @@ release: sync
 		echo "TAG is empty"; \
 		exit 1; \
 	fi
+	@current=$$(git rev-parse --abbrev-ref HEAD); \
+	if [ "$$current" = "HEAD" ]; then \
+		git checkout -B "$(BRANCH)"; \
+	fi
 	git add -A
 	@if git diff --cached --quiet; then \
 		echo "No changes to commit."; \
@@ -54,7 +59,8 @@ release: sync
 	@if git ls-remote --tags origin "refs/tags/$(TAG)" | grep -q "$(TAG)"; then \
 		git push --delete origin "$(TAG)"; \
 	fi
-	git push --follow-tags
+	git push --force-with-lease origin "$(BRANCH)"
+	git push --force origin "$(TAG)"
 
 clean:
 	rm -rf node_modules out .vscode-test *.vsix *.tsbuildinfo
