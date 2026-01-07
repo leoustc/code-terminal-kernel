@@ -3,6 +3,7 @@
 NODE_BIN := ./node_modules/.bin
 TSC := $(NODE_BIN)/tsc
 VSCE := $(NODE_BIN)/vsce
+NAME_FILE := NAME
 VERSION_FILE := VERSION
 PKG_JSON := package.json
 TAG ?= v$(shell cat $(VERSION_FILE))
@@ -33,6 +34,7 @@ tag:
 		echo "Remote tag exists: $(TAG)"; \
 		exit 1; \
 	fi
+	@node -e "const fs=require('fs'); const name=fs.readFileSync('$(NAME_FILE)','utf8').trim(); const v=fs.readFileSync('$(VERSION_FILE)','utf8').trim(); const path='$(PKG_JSON)'; const pkg=JSON.parse(fs.readFileSync(path,'utf8')); let changed=false; if (pkg.name!==name) { pkg.name=name; changed=true; } if (pkg.version!==v) { pkg.version=v; changed=true; } if (changed) { fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n'); }"
 	git add -A
 	@if git diff --cached --quiet; then \
 		echo "No changes to commit."; \
