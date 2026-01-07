@@ -18,10 +18,18 @@ build: npm sync
 
 save:
 	git add -A
-	@if [ -z "$(MSG)" ]; then \
-		git commit --amend --no-edit; \
+	@if [ "$(AMEND)" = "1" ]; then \
+		if [ -n "$(MSG)" ]; then \
+			git commit --amend -m "$(MSG)"; \
+		else \
+			git commit --amend; \
+		fi; \
 	else \
-		git commit -m "$(MSG)"; \
+		if [ -n "$(MSG)" ]; then \
+			git commit -m "$(MSG)"; \
+		else \
+			git commit; \
+		fi; \
 	fi
 
 push:
