@@ -25,7 +25,12 @@ save:
 	fi
 
 push:
-	git push --follow-tags
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "Working tree is not clean. Run: make save (or stash)"; \
+		exit 1; \
+	fi
+	git pull --rebase origin "$(BRANCH)"
+	git push --follow-tags origin "$(BRANCH)"
 
 tag:
 	@if [ -z "$(TAG)" ]; then \
@@ -36,6 +41,10 @@ tag:
 		git tag -d "$(TAG)"; \
 	fi
 	git tag -a "$(TAG)" -m "$(TAG)"
+	@if git ls-remote --tags origin "refs/tags/$(TAG)" | grep -q "$(TAG)"; then \
+		git push --delete origin "$(TAG)"; \
+	fi
+	git push origin "$(TAG)"
 
 release: sync
 	@if [ -z "$(TAG)" ]; then \
