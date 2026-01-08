@@ -2,6 +2,9 @@
 
 Terminal Kernel lets you create and reuse persistent terminals from VS Code.
 
+Features:
+- `codexinbox`: run Codex in a hardened Docker container with restricted filesystem access (only the current working directory and its subfolders are writable).
+
 Usage:
 - Click the Terminal Kernel icon in the Activity Bar
 - Sessions are grouped by tool name; the default group is `Terminal`
@@ -27,7 +30,13 @@ Settings:
 - `terminalKernel.preloadEnvFile`: path to a shell file to source when starting a new session.
 - `terminalKernel.tools`: list of tool command paths (executables only, no arguments); the sidebar uses the command basename as the group name.
   - Add or remove tool entries in the VS Code Settings UI to control which groups appear in the sidebar.
-  - Executables shipped in the extension's `tools/` folder are auto-included.
+  - Executables shipped in the extension's `tools/` folder are auto-included and appear before custom entries.
+
+Built-in tools:
+- `codexinbox`: launches Codex in a container with restricted filesystem access.
+  - Requires Docker installed and available on your PATH.
+  - Runs `docker.io/leoustc/codex:latest` with dropped capabilities and no new privileges.
+  - Mounts the current working directory (and subfolders) read-write; other host paths are not mounted except optional Codex config/SSH mounts.
 
 Tools example (`settings.json`):
 ```json
@@ -40,6 +49,6 @@ Tools example (`settings.json`):
 }
 ```
 
-Requires `tmux` or `screen` installed on the system (based on the backend setting).
+Requires `tmux` or `screen` installed on the system (based on the backend setting). `codexinbox` also requires Docker.
 
 License: GPL v2
