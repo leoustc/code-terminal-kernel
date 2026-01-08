@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+volumes=()
+add_volume_if_exists() {
+  local src="$1"
+  local dest="$2"
+  local mode="${3:-ro}"
+
+  if [ -e "$src" ]; then
+    volumes+=("-v" "$src:$dest:$mode")
+  fi
+}
+
+add_volume_if_exists "$HOME/.codex" "/tmp/codex-home/.codex" "rw"
+add_volume_if_exists "$HOME/.config/openai" "/tmp/codex-home/.config/openai" "ro"
+add_volume_if_exists "$HOME/.ssh" "/tmp/codex-home/.ssh" "ro"
+
+docker run --rm -it \
+  --user "$(id -u):$(id -g)" \
+  --security-opt no-new-privileges \
+  --cap-drop ALL \
+  -e HOME=/tmp/codex-home \
+  -e OPENAI_API_KEY \
+  -v "$PWD:$PWD:rw" \
+  "${volumes[@]}" \
+  -v /etc/ssl/certs:/etc/ssl/certs:ro \
+  --tmpfs /tmp/codex-home \
+  -w "$PWD" \
+  docker.io/leoustc/codex:latest \
+  codex

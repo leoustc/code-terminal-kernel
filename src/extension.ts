@@ -9,6 +9,8 @@ type Backend = 'tmux' | 'screen';
 type ShellName = 'bash' | 'sh';
 type GroupKey = string;
 
+let bundledTools: string[] = [];
+
 class TerminalItem extends vscode.TreeItem {
   constructor(public readonly session: string) {
     super(session, vscode.TreeItemCollapsibleState.None);
@@ -137,6 +139,53 @@ function getShellName(): ShellName {
   return shell === 'sh' ? 'sh' : 'bash';
 }
 
+function discoverBundledTools(toolsDir: string): string[] {
+  let entries: fs.Dirent[] = [];
+  try {
+    entries = fs.readdirSync(toolsDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const tools: string[] = [];
+  entries.forEach(entry => {
+    if (!entry.isFile()) return;
+    const toolPath = path.join(toolsDir, entry.name);
+    try {
+      fs.accessSync(toolPath, fs.constants.X_OK);
+      tools.push(toolPath);
+    } catch {
+      // Ignore non-executable files.
+    }
+  });
+
+  tools.sort();
+  return tools;
+}
+
+function mergeTools(primary: string[], secondary: string[]): string[] {
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  const add = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    merged.push(trimmed);
+  };
+  primary.forEach(add);
+  secondary.forEach(add);
+  return merged;
+}
+
+function resolveToolCommand(command: string): string {
+  const trimmed = command.trim();
+  if (!trimmed) return trimmed;
+  if (bundledTools.includes(trimmed)) {
+    return `. ${shellEscape(trimmed)}`;
+  }
+  return trimmed;
+}
+
 function getPreloadEnvFile(): string | undefined {
   const raw = vscode.workspace
     .getConfiguration('terminalKernel')
@@ -160,8 +209,10 @@ function getToolsConfig(): string[] {
   const raw = vscode.workspace
     .getConfiguration('terminalKernel')
     .get<unknown>('tools', ['codex']);
-  if (!Array.isArray(raw)) return ['codex'];
-  return raw.map(value => (typeof value === 'string' ? value : String(value ?? '')));
+  const configTools = Array.isArray(raw)
+    ? raw.map(value => (typeof value === 'string' ? value : String(value ?? '')))
+    : ['codex'];
+  return mergeTools(bundledTools, configTools);
 }
 
 function shellEscape(value: string): string {
@@ -368,6 +419,8 @@ function getValidatedEnvFile(): string | null | undefined {
 }
 
 export function activate(context: vscode.ExtensionContext) {
+  bundledTools = discoverBundledTools(context.asAbsolutePath('tools'));
+
   const provider = new TerminalProvider();
   vscode.window.createTreeView('terminalKernelSessions', { treeDataProvider: provider });
 
@@ -434,7 +487,8 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
     const prefix = getToolPrefix(trimmed);
-    await startSessionWithPrefix(prefix, trimmed);
+    const resolvedCommand = resolveToolCommand(trimmed);
+    await startSessionWithPrefix(prefix, resolvedCommand);
   };
 
   context.subscriptions.push(

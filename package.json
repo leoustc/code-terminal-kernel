@@ -118,7 +118,7 @@
             "type": "string",
             "description": "Path to the command to run when starting a tool session."
           },
-          "description": "Tool command paths to run when tmux/screen starts a session. The sidebar shows the basename."
+          "description": "Tool command paths to run when tmux/screen starts a session, plus any executables bundled in the extension's tools/ folder. The sidebar shows the basename."
         },
         "terminalKernel.preloadEnvFile": {
           "type": "string",

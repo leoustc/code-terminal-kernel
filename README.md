@@ -27,6 +27,7 @@ Settings:
 - `terminalKernel.preloadEnvFile`: path to a shell file to source when starting a new session.
 - `terminalKernel.tools`: list of tool command paths (executables only, no arguments); the sidebar uses the command basename as the group name.
   - Add or remove tool entries in the VS Code Settings UI to control which groups appear in the sidebar.
+  - Executables shipped in the extension's `tools/` folder are auto-included.
 
 Tools example (`settings.json`):
 ```json
