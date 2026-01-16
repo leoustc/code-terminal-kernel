@@ -52,12 +52,28 @@
         "title": "Connect to Terminal"
       },
       {
+        "command": "terminalKernel.addFavorite",
+        "title": "Favorite"
+      },
+      {
+        "command": "terminalKernel.removeFavorite",
+        "title": "Unfavorite"
+      },
+      {
         "command": "terminalKernel.showSession",
         "title": "Clear"
       },
       {
         "command": "terminalKernel.deleteSession",
         "title": "Delete"
+      },
+      {
+        "command": "terminalKernel.setFilter",
+        "title": "Filter Sessions"
+      },
+      {
+        "command": "terminalKernel.clearFilter",
+        "title": "Clear Filter"
       },
       {
         "command": "terminalKernel.refresh",
@@ -70,6 +86,18 @@
           "command": "terminalKernel.refresh",
           "when": "view == terminalKernelSessions",
           "group": "navigation"
+        },
+        {
+          "command": "terminalKernel.setFilter",
+          "when": "view == terminalKernelSessions",
+          "group": "navigation@2",
+          "icon": "$(filter)"
+        },
+        {
+          "command": "terminalKernel.clearFilter",
+          "when": "view == terminalKernelSessions && terminalKernel.filterActive",
+          "group": "navigation@3",
+          "icon": "$(clear-all)"
         }
       ],
       "view/item/context": [
@@ -81,18 +109,30 @@
         },
         {
           "command": "terminalKernel.connectSession",
-          "when": "view == terminalKernelSessions && viewItem == terminalSession",
+          "when": "view == terminalKernelSessions && (viewItem == terminalSession || viewItem == terminalSessionFavorite)",
           "group": "context@1"
         },
         {
-          "command": "terminalKernel.showSession",
+          "command": "terminalKernel.addFavorite",
           "when": "view == terminalKernelSessions && viewItem == terminalSession",
+          "group": "inline@1",
+          "icon": "$(star)"
+        },
+        {
+          "command": "terminalKernel.removeFavorite",
+          "when": "view == terminalKernelSessions && viewItem == terminalSessionFavorite",
+          "group": "inline@1",
+          "icon": "$(star-full)"
+        },
+        {
+          "command": "terminalKernel.showSession",
+          "when": "view == terminalKernelSessions && (viewItem == terminalSession || viewItem == terminalSessionFavorite)",
           "group": "inline@2",
           "icon": "$(clear-all)"
         },
         {
           "command": "terminalKernel.deleteSession",
-          "when": "view == terminalKernelSessions && viewItem == terminalSession",
+          "when": "view == terminalKernelSessions && (viewItem == terminalSession || viewItem == terminalSessionFavorite)",
           "group": "inline@6",
           "icon": "$(close)"
         }
@@ -139,6 +179,11 @@
           "type": "boolean",
           "default": false,
           "description": "Enable tmux mouse mode. When on, tmux captures selection and can interfere with VS Code text selection."
+        },
+        "terminalKernel.autoCloseFrontends": {
+          "type": "boolean",
+          "default": false,
+          "description": "Close all attached front-end terminals for known sessions when VS Code exits."
         }
       }
     }

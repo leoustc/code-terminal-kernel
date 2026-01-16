@@ -11,14 +11,23 @@ type GroupKey = string;
 
 const SESSION_CACHE_TTL_MS = 500;
 const SESSION_NAME_MAX = 24;
+const FAVORITES_GROUP = 'favorites';
+const FAVORITES_KEY = 'terminalKernel.favorites';
+const FILTER_KEY = 'terminalKernel.sessionFilter';
+const SESSION_DRAG_MIME = 'application/vnd.code.tree.terminalKernelSessions';
 
 let bundledTools: string[] = [];
+let favoriteSessions = new Set<string>();
+let sessionFilter = '';
+let extensionContext: vscode.ExtensionContext | undefined;
+let sessionTreeView: vscode.TreeView<TerminalItem | GroupItem> | undefined;
+const knownSessions = new Set<string>();
 const sessionTerminals = new Map<string, Set<vscode.Terminal>>();
 
 class TerminalItem extends vscode.TreeItem {
-  constructor(public readonly session: string) {
+  constructor(public readonly session: string, isFavorite: boolean) {
     super(session, vscode.TreeItemCollapsibleState.None);
-    this.contextValue = 'terminalSession';
+    this.contextValue = isFavorite ? 'terminalSessionFavorite' : 'terminalSession';
     this.iconPath = new vscode.ThemeIcon('terminal');
     this.tooltip = `terminal: ${session}`;
     this.command = {
@@ -33,7 +42,8 @@ class GroupItem extends vscode.TreeItem {
   constructor(
     public readonly groupName: GroupKey,
     public readonly commandText: string | undefined,
-    count: number
+    count: number,
+    contextValue = 'terminalGroup'
   ) {
     const displayName = capitalizeGroupName(groupName);
     const hasSessions = count > 0;
@@ -41,7 +51,7 @@ class GroupItem extends vscode.TreeItem {
       ? vscode.TreeItemCollapsibleState.Expanded
       : vscode.TreeItemCollapsibleState.Collapsed;
     super(displayName, state);
-    this.contextValue = 'terminalGroup';
+    this.contextValue = contextValue;
     this.description = String(count);
     this.id = `terminalGroup:${groupName}:${count}`;
     this.collapsibleState = state;
@@ -76,7 +86,7 @@ class TerminalProvider implements vscode.TreeDataProvider<TerminalItem | GroupIt
       .filter(Boolean)
       .forEach(command => {
         const name = getToolPrefix(command);
-        if (!name || seen.has(name) || name === 'terminal') return;
+        if (!name || seen.has(name) || name === 'terminal' || name === FAVORITES_GROUP) return;
         seen.add(name);
         groups.push({ name, command });
       });
@@ -133,24 +143,39 @@ class TerminalProvider implements vscode.TreeDataProvider<TerminalItem | GroupIt
     return this.sessionsFetch;
   }
 
+  private async getFilteredSessions(): Promise<string[]> {
+    const sessions = await this.getSessions();
+    return applySessionFilter(sessions);
+  }
+
   private async getGroupedSessions(): Promise<Map<GroupKey, string[]>> {
     if (this.groupedCache) return this.groupedCache;
-    const sessions = await this.getSessions();
+    const sessions = await this.getFilteredSessions();
     const grouped = this.groupSessions(sessions);
     this.groupedCache = grouped;
     return grouped;
   }
 
-  private buildGroupItems(sessionsByGroup: Map<GroupKey, string[]>): GroupItem[] {
+  private buildGroupItems(
+    sessions: string[],
+    sessionsByGroup: Map<GroupKey, string[]>
+  ): GroupItem[] {
     const items: GroupItem[] = [];
     const seen = new Set<GroupKey>();
-    const addGroup = (name: GroupKey, commandText?: string) => {
+    const addGroup = (
+      name: GroupKey,
+      commandText?: string,
+      contextValue?: string,
+      countOverride?: number
+    ) => {
       if (seen.has(name)) return;
       seen.add(name);
-      const count = sessionsByGroup.get(name)?.length ?? 0;
-      items.push(new GroupItem(name, commandText, count));
+      const count = countOverride ?? sessionsByGroup.get(name)?.length ?? 0;
+      items.push(new GroupItem(name, commandText, count, contextValue));
     };
 
+    const favorites = getFavoriteSessions(sessions);
+    addGroup(FAVORITES_GROUP, undefined, 'terminalGroupFavorites', favorites.length);
     addGroup('terminal');
     this.getToolGroups().forEach(group => addGroup(group.name, group.command));
     const extra = Array.from(sessionsByGroup.keys()).filter(name => !seen.has(name));
@@ -161,13 +186,18 @@ class TerminalProvider implements vscode.TreeDataProvider<TerminalItem | GroupIt
   async getChildren(element?: TerminalItem | GroupItem): Promise<(TerminalItem | GroupItem)[]> {
     try {
       if (!element) {
+        const sessions = await this.getFilteredSessions();
         const grouped = await this.getGroupedSessions();
-        return this.buildGroupItems(grouped);
+        return this.buildGroupItems(sessions, grouped);
       }
       if (element instanceof GroupItem) {
+        const sessions = await this.getFilteredSessions();
+        if (element.groupName === FAVORITES_GROUP) {
+          return getFavoriteSessions(sessions).map(name => new TerminalItem(name, true));
+        }
         const grouped = await this.getGroupedSessions();
         const groupSessions = grouped.get(element.groupName) ?? [];
-        return groupSessions.map(name => new TerminalItem(name));
+        return groupSessions.map(name => new TerminalItem(name, isFavorite(name)));
       }
       return [];
     } catch (err) {
@@ -193,6 +223,12 @@ function getShellName(): ShellName {
 
 function getTmuxMouseEnabled(): boolean {
   return vscode.workspace.getConfiguration('terminalKernel').get<boolean>('tmuxMouse', false);
+}
+
+function getAutoCloseFrontends(): boolean {
+  return vscode.workspace
+    .getConfiguration('terminalKernel')
+    .get<boolean>('autoCloseFrontends', false);
 }
 
 function discoverBundledTools(toolsDir: string): string[] {
@@ -225,6 +261,80 @@ function resolveHomePath(value: string): string {
     return path.join(os.homedir(), value.slice(2));
   }
   return value;
+}
+
+function loadFavorites(context: vscode.ExtensionContext) {
+  const stored = context.workspaceState.get<string[]>(FAVORITES_KEY, []);
+  favoriteSessions = new Set(stored);
+}
+
+function persistFavorites() {
+  if (!extensionContext) return;
+  const sorted = Array.from(favoriteSessions).sort();
+  extensionContext.workspaceState.update(FAVORITES_KEY, sorted);
+}
+
+function isFavorite(session: string): boolean {
+  return favoriteSessions.has(session);
+}
+
+function addFavoriteSessions(sessions: string[]) {
+  let changed = false;
+  sessions.forEach(session => {
+    if (favoriteSessions.has(session)) return;
+    favoriteSessions.add(session);
+    changed = true;
+  });
+  if (changed) persistFavorites();
+}
+
+function removeFavoriteSession(session: string) {
+  if (!favoriteSessions.delete(session)) return;
+  persistFavorites();
+}
+
+function getFavoriteSessions(sessions: string[]): string[] {
+  return sessions.filter(session => favoriteSessions.has(session));
+}
+
+function loadSessionFilter(context: vscode.ExtensionContext) {
+  sessionFilter = context.workspaceState.get<string>(FILTER_KEY, '').trim();
+  updateFilterContext();
+  updateTreeMessage();
+}
+
+function setSessionFilter(value: string) {
+  sessionFilter = value.trim();
+  if (extensionContext) {
+    extensionContext.workspaceState.update(FILTER_KEY, sessionFilter);
+  }
+  updateFilterContext();
+  updateTreeMessage();
+}
+
+function getSessionFilter(): string {
+  return sessionFilter;
+}
+
+function applySessionFilter(sessions: string[]): string[] {
+  const filter = getSessionFilter().toLowerCase();
+  if (!filter) return sessions;
+  return sessions.filter(session => session.toLowerCase().includes(filter));
+}
+
+function rememberSessions(sessions: string[]) {
+  sessions.forEach(session => knownSessions.add(session));
+}
+
+function updateFilterContext() {
+  const active = Boolean(getSessionFilter());
+  vscode.commands.executeCommand('setContext', 'terminalKernel.filterActive', active);
+}
+
+function updateTreeMessage() {
+  if (!sessionTreeView) return;
+  const filter = getSessionFilter();
+  sessionTreeView.message = filter ? `Filter: ${filter}` : undefined;
 }
 
 function sanitizeSessionName(value: string): string {
@@ -370,11 +480,15 @@ async function listSessions(): Promise<string[]> {
     if (backend === 'screen') {
       const result = await execFileResult('screen', ['-ls']);
       const combined = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
-      return parseScreenSessions(combined);
+      const sessions = parseScreenSessions(combined);
+      rememberSessions(sessions);
+      return sessions;
     }
     const result = await execFileResult('tmux', ['ls']);
     if (result.error) return [];
-    return parseTmuxSessions(result.stdout);
+    const sessions = parseTmuxSessions(result.stdout);
+    rememberSessions(sessions);
+    return sessions;
   } catch {
     return [];
   }
@@ -395,6 +509,7 @@ function createSession(
       options
     );
     configureScreenScrollback(session);
+    knownSessions.add(session);
     return;
   }
   execSync(
@@ -402,6 +517,7 @@ function createSession(
     options
   );
   configureTmuxStatus(session);
+  knownSessions.add(session);
 }
 
 function attachSessionCommand(session: string): string {
@@ -505,7 +621,9 @@ function getSessionGroupName(session: string, knownGroups: GroupKey[] = []): Gro
     if (lowered.startsWith(`${group}-`)) return group;
   }
   const match = /^(.+)-([a-z0-9-]+)$/i.exec(session);
-  return match?.[1]?.toLowerCase() || 'terminal';
+  const group = match?.[1]?.toLowerCase();
+  if (group === FAVORITES_GROUP) return 'terminal';
+  return group || 'terminal';
 }
 
 function capitalizeGroupName(name: string): string {
@@ -536,6 +654,7 @@ function connectToSession(session: string) {
 }
 
 function trackSessionTerminal(session: string, term: vscode.Terminal) {
+  knownSessions.add(session);
   const existing = sessionTerminals.get(session);
   if (existing) {
     existing.add(term);
@@ -574,6 +693,13 @@ function clearSessionFrontends(session: string) {
   tracked.forEach(term => term.dispose());
 }
 
+function closeKnownSessionFrontends() {
+  const sessions = Array.from(knownSessions);
+  sessions.forEach(session => {
+    discoverSessionTerminals(session).forEach(term => term.dispose());
+  });
+}
+
 function getValidatedEnvFile(): string | null | undefined {
   const envFile = getPreloadEnvFile();
   if (envFile && !fs.existsSync(envFile)) {
@@ -584,10 +710,49 @@ function getValidatedEnvFile(): string | null | undefined {
 }
 
 export function activate(context: vscode.ExtensionContext) {
+  extensionContext = context;
+  loadFavorites(context);
+  loadSessionFilter(context);
   bundledTools = discoverBundledTools(context.asAbsolutePath('tools'));
 
   const provider = new TerminalProvider();
-  vscode.window.createTreeView('terminalKernelSessions', { treeDataProvider: provider });
+  const dragAndDropController: vscode.TreeDragAndDropController<
+    TerminalItem | GroupItem
+  > = {
+    dragMimeTypes: [SESSION_DRAG_MIME],
+    dropMimeTypes: [SESSION_DRAG_MIME],
+    handleDrag(source, dataTransfer) {
+      const sessions = source
+        .filter((item): item is TerminalItem => item instanceof TerminalItem)
+        .map(item => item.session);
+      if (sessions.length === 0) return;
+      dataTransfer.set(SESSION_DRAG_MIME, new vscode.DataTransferItem(JSON.stringify(sessions)));
+    },
+    async handleDrop(target, dataTransfer) {
+      if (!(target instanceof GroupItem) || target.groupName !== FAVORITES_GROUP) return;
+      const item = dataTransfer.get(SESSION_DRAG_MIME);
+      if (!item) return;
+      const raw = await item.asString();
+      let sessions: unknown;
+      try {
+        sessions = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      if (!Array.isArray(sessions)) return;
+      const cleaned = sessions.filter((session): session is string => typeof session === 'string');
+      if (cleaned.length === 0) return;
+      addFavoriteSessions(cleaned);
+      provider.refresh();
+    }
+  };
+  const treeView = vscode.window.createTreeView('terminalKernelSessions', {
+    treeDataProvider: provider,
+    dragAndDropController
+  });
+  sessionTreeView = treeView;
+  updateTreeMessage();
+  context.subscriptions.push(treeView);
 
   const startSessionWithPrefix = async (prefix: string, initialCommand?: string) => {
     const suffix = await vscode.window.showInputBox({
@@ -620,6 +785,42 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('terminalKernel.connectSession', async (item: TerminalItem) => {
       if (!item?.session) return;
       connectToSession(item.session);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('terminalKernel.addFavorite', async (item: TerminalItem) => {
+      if (!item?.session) return;
+      addFavoriteSessions([item.session]);
+      provider.refresh();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('terminalKernel.removeFavorite', async (item: TerminalItem) => {
+      if (!item?.session) return;
+      removeFavoriteSession(item.session);
+      provider.refresh();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('terminalKernel.setFilter', async () => {
+      const value = await vscode.window.showInputBox({
+        prompt: 'Filter sessions',
+        value: getSessionFilter()
+      });
+      if (value === undefined) return;
+      setSessionFilter(value);
+      provider.refresh();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('terminalKernel.clearFilter', () => {
+      if (!getSessionFilter()) return;
+      setSessionFilter('');
+      provider.refresh();
     })
   );
 
@@ -696,6 +897,13 @@ export function activate(context: vscode.ExtensionContext) {
           sessionTerminals.delete(session);
         }
       });
+    })
+  );
+
+  context.subscriptions.push(
+    new vscode.Disposable(() => {
+      if (!getAutoCloseFrontends()) return;
+      closeKnownSessionFrontends();
     })
   );
 }
