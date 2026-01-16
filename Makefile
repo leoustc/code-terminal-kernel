@@ -1,11 +1,13 @@
-.PHONY: save push tag package clean
+.PHONY: save push tag package clean reset
 
 NODE_BIN := ./node_modules/.bin
 TSC := $(NODE_BIN)/tsc
 VSCE := $(NODE_BIN)/vsce
+CODE ?= $(shell command -v code-server >/dev/null 2>&1 && echo code-server || echo code)
 NAME_FILE := NAME
 VERSION_FILE := VERSION
 PKG_JSON := package.json
+EXT_ID ?= $(shell node -e "const pkg=require('./$(PKG_JSON)'); console.log(pkg.publisher + '.' + pkg.name);")
 TAG ?= v$(shell cat $(VERSION_FILE))
 BRANCH ?= main
 OUT_DIR ?= $(CURDIR)
@@ -63,3 +65,14 @@ package:
 
 clean:
 	rm -rf node_modules out .vscode-test *.vsix *.tsbuildinfo
+
+reset: package
+	@out_dir="$(OUT_DIR)"; \
+	base=$$(node -e "const pkg=require('./$(PKG_JSON)'); console.log(pkg.name + '-' + pkg.version + '.vsix');"); \
+	vsix="$$out_dir/$$base"; \
+	if [ ! -f "$$vsix" ]; then \
+		echo "VSIX not found: $$vsix"; \
+		exit 1; \
+	fi; \
+	"$(CODE)" --uninstall-extension "$(EXT_ID)" >/dev/null 2>&1 || true; \
+	"$(CODE)" --install-extension "$$vsix" --force

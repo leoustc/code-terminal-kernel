@@ -1,6 +1,6 @@
 
 import * as vscode from 'vscode';
-import { execSync } from 'child_process';
+import { execSync, execFile } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -8,6 +8,9 @@ import * as path from 'path';
 type Backend = 'tmux' | 'screen';
 type ShellName = 'bash' | 'sh';
 type GroupKey = string;
+
+const SESSION_CACHE_TTL_MS = 500;
+const SESSION_NAME_MAX = 24;
 
 let bundledTools: string[] = [];
 
@@ -48,8 +51,15 @@ class GroupItem extends vscode.TreeItem {
 class TerminalProvider implements vscode.TreeDataProvider<TerminalItem | GroupItem> {
   private _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+  private sessionsCache: string[] | undefined;
+  private groupedCache: Map<GroupKey, string[]> | undefined;
+  private sessionsCacheAt = 0;
+  private sessionsFetch?: Promise<string[]>;
 
   refresh() {
+    this.sessionsCache = undefined;
+    this.groupedCache = undefined;
+    this.sessionsFetch = undefined;
     this._onDidChangeTreeData.fire();
   }
 
@@ -72,10 +82,25 @@ class TerminalProvider implements vscode.TreeDataProvider<TerminalItem | GroupIt
     return groups;
   }
 
+  private getKnownGroupNames(): GroupKey[] {
+    const names = ['terminal', ...this.getToolGroups().map(group => group.name)];
+    const seen = new Set<GroupKey>();
+    const unique: GroupKey[] = [];
+    names.forEach(name => {
+      const lowered = name.toLowerCase();
+      if (seen.has(lowered)) return;
+      seen.add(lowered);
+      unique.push(lowered);
+    });
+    unique.sort((a, b) => b.length - a.length);
+    return unique;
+  }
+
   private groupSessions(sessions: string[]): Map<GroupKey, string[]> {
     const grouped = new Map<GroupKey, string[]>();
+    const knownGroups = this.getKnownGroupNames();
     sessions.forEach(session => {
-      const key = getSessionGroupName(session);
+      const key = getSessionGroupName(session, knownGroups);
       const existing = grouped.get(key);
       if (existing) {
         existing.push(session);
@@ -83,6 +108,35 @@ class TerminalProvider implements vscode.TreeDataProvider<TerminalItem | GroupIt
         grouped.set(key, [session]);
       }
     });
+    return grouped;
+  }
+
+  private async getSessions(): Promise<string[]> {
+    const now = Date.now();
+    if (this.sessionsCache && now - this.sessionsCacheAt < SESSION_CACHE_TTL_MS) {
+      return this.sessionsCache;
+    }
+    if (this.sessionsFetch) {
+      return this.sessionsFetch;
+    }
+    this.sessionsFetch = listSessions()
+      .then(sessions => {
+        this.sessionsCache = sessions;
+        this.sessionsCacheAt = Date.now();
+        this.groupedCache = undefined;
+        return sessions;
+      })
+      .finally(() => {
+        this.sessionsFetch = undefined;
+      });
+    return this.sessionsFetch;
+  }
+
+  private async getGroupedSessions(): Promise<Map<GroupKey, string[]>> {
+    if (this.groupedCache) return this.groupedCache;
+    const sessions = await this.getSessions();
+    const grouped = this.groupSessions(sessions);
+    this.groupedCache = grouped;
     return grouped;
   }
 
@@ -103,24 +157,21 @@ class TerminalProvider implements vscode.TreeDataProvider<TerminalItem | GroupIt
     return items;
   }
 
-  getChildren(
-    element?: TerminalItem | GroupItem
-  ): Thenable<(TerminalItem | GroupItem)[]> {
+  async getChildren(element?: TerminalItem | GroupItem): Promise<(TerminalItem | GroupItem)[]> {
     try {
-      const sessions = listSessions();
       if (!element) {
-        const grouped = this.groupSessions(sessions);
-        return Promise.resolve(this.buildGroupItems(grouped));
+        const grouped = await this.getGroupedSessions();
+        return this.buildGroupItems(grouped);
       }
       if (element instanceof GroupItem) {
-        const grouped = this.groupSessions(sessions);
+        const grouped = await this.getGroupedSessions();
         const groupSessions = grouped.get(element.groupName) ?? [];
-        return Promise.resolve(groupSessions.map(name => new TerminalItem(name)));
+        return groupSessions.map(name => new TerminalItem(name));
       }
-      return Promise.resolve([]);
+      return [];
     } catch (err) {
       vscode.window.showErrorMessage('Unable to list terminals');
-      return Promise.resolve([]);
+      return [];
     }
   }
 }
@@ -137,6 +188,10 @@ function getShellName(): ShellName {
     .getConfiguration('terminalKernel')
     .get<string>('shell', 'bash');
   return shell === 'sh' ? 'sh' : 'bash';
+}
+
+function getTmuxMouseEnabled(): boolean {
+  return vscode.workspace.getConfiguration('terminalKernel').get<boolean>('tmuxMouse', false);
 }
 
 function discoverBundledTools(toolsDir: string): string[] {
@@ -161,6 +216,39 @@ function discoverBundledTools(toolsDir: string): string[] {
 
   tools.sort();
   return tools;
+}
+
+function resolveHomePath(value: string): string {
+  if (value === '~') return os.homedir();
+  if (value.startsWith('~/')) {
+    return path.join(os.homedir(), value.slice(2));
+  }
+  return value;
+}
+
+function sanitizeSessionName(value: string): string {
+  return value.replace(/[^a-zA-Z0-9-]/g, '-');
+}
+
+function buildNumberedSessionName(prefix: string, suffix: number | string): string {
+  const safePrefix = sanitizeSessionName(prefix) || 'terminal';
+  const suffixText = String(suffix);
+  const maxPrefixLen = Math.max(1, SESSION_NAME_MAX - suffixText.length - 1);
+  const trimmedPrefix = safePrefix.slice(0, maxPrefixLen);
+  return `${trimmedPrefix}-${suffixText}`;
+}
+
+function buildSessionName(prefix: string, suffix: string): string {
+  const safePrefix = sanitizeSessionName(prefix) || 'terminal';
+  const safeSuffix = sanitizeSessionName(suffix);
+  if (safePrefix.length >= SESSION_NAME_MAX - 1) {
+    const trimmedPrefix = safePrefix.slice(0, SESSION_NAME_MAX - 2);
+    const trimmedSuffix = safeSuffix.slice(0, 1);
+    return `${trimmedPrefix}-${trimmedSuffix}`;
+  }
+  const maxSuffixLen = Math.max(1, SESSION_NAME_MAX - safePrefix.length - 1);
+  const trimmedSuffix = safeSuffix.slice(0, maxSuffixLen);
+  return `${safePrefix}-${trimmedSuffix}`;
 }
 
 function mergeTools(primary: string[], secondary: string[]): string[] {
@@ -192,10 +280,7 @@ function getPreloadEnvFile(): string | undefined {
     .get<string>('preloadEnvFile', '')
     .trim();
   if (!raw) return undefined;
-  let resolved = raw;
-  if (resolved.startsWith('~')) {
-    resolved = path.join(os.homedir(), resolved.slice(1));
-  }
+  let resolved = resolveHomePath(raw);
   if (!path.isAbsolute(resolved)) {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (workspaceRoot) {
@@ -263,13 +348,32 @@ function parseScreenSessions(out: string): string[] {
     .filter((name): name is string => Boolean(name));
 }
 
-function listSessions(): string[] {
+function execFileResult(
+  command: string,
+  args: string[]
+): Promise<{ stdout: string; stderr: string; error: Error | null }> {
+  return new Promise(resolve => {
+    execFile(command, args, { encoding: 'utf8' }, (error, stdout, stderr) => {
+      resolve({
+        stdout: (stdout ?? '').trim(),
+        stderr: (stderr ?? '').trim(),
+        error: error ?? null
+      });
+    });
+  });
+}
+
+async function listSessions(): Promise<string[]> {
   try {
     const backend = getBackend();
-    const cmd =
-      backend === 'screen' ? 'screen -ls 2>/dev/null || true' : 'tmux ls 2>/dev/null || true';
-    const out = execSync(cmd).toString().trim();
-    return backend === 'screen' ? parseScreenSessions(out) : parseTmuxSessions(out);
+    if (backend === 'screen') {
+      const result = await execFileResult('screen', ['-ls']);
+      const combined = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+      return parseScreenSessions(combined);
+    }
+    const result = await execFileResult('tmux', ['ls']);
+    if (result.error) return [];
+    return parseTmuxSessions(result.stdout);
   } catch {
     return [];
   }
@@ -286,14 +390,14 @@ function createSession(
   const shellCommand = getShellCommand(envFile, initialCommand);
   if (backend === 'screen') {
     execSync(
-      `screen -dmS ${session} ${shellCommand}`,
+      `screen -dmS ${shellEscape(session)} ${shellCommand}`,
       options
     );
     configureScreenScrollback(session);
     return;
   }
   execSync(
-    `tmux new -d -s ${session} ${shellCommand}`,
+    `tmux new -d -s ${shellEscape(session)} ${shellCommand}`,
     options
   );
   configureTmuxStatus(session);
@@ -301,23 +405,27 @@ function createSession(
 
 function attachSessionCommand(session: string): string {
   const backend = getBackend();
-  return backend === 'screen' ? `screen -r ${session}` : `tmux attach -t ${session}`;
+  return backend === 'screen'
+    ? `screen -r ${shellEscape(session)}`
+    : `tmux attach -t ${shellEscape(session)}`;
 }
 
 function deleteSession(session: string) {
   const backend = getBackend();
   if (backend === 'screen') {
-    execSync(`screen -S ${session} -X quit`);
+    execSync(`screen -S ${shellEscape(session)} -X quit`);
     return;
   }
-  execSync(`tmux kill-session -t ${session}`);
+  execSync(`tmux kill-session -t ${shellEscape(session)}`);
 }
 
-function getNextSessionName(prefix: string): string {
+async function getNextSessionName(prefix: string): Promise<string> {
   try {
+    const safePrefix = sanitizeSessionName(prefix) || 'terminal';
     const used = new Set<number>();
-    listSessions().forEach(name => {
-      const token = `${prefix}-`;
+    const sessions = await listSessions();
+    sessions.forEach(name => {
+      const token = `${safePrefix}-`;
       if (!name.startsWith(token)) return;
       const suffix = Number(name.slice(token.length));
       if (Number.isInteger(suffix) && suffix > 0) {
@@ -326,15 +434,15 @@ function getNextSessionName(prefix: string): string {
     });
     let next = 1;
     while (used.has(next)) next += 1;
-    return `${prefix}-${next}`;
+    return buildNumberedSessionName(safePrefix, next);
   } catch {
-    return `${prefix}-1`;
+    return buildNumberedSessionName(prefix, 1);
   }
 }
 
 function configureTmuxStatus(session: string) {
   const options: Array<[string, string, 'session' | 'global']> = [
-    ['mouse', 'on', 'global'],
+    ['mouse', getTmuxMouseEnabled() ? 'on' : 'off', 'global'],
     ['status', 'on', 'session'],
     ['status-interval', '5', 'session'],
     ['status-justify', 'left', 'session'],
@@ -343,9 +451,21 @@ function configureTmuxStatus(session: string) {
     ['status-left', ' #{session_name} #{?client_prefix,[PREFIX] ,}', 'session'],
     ['status-right', ' #{pane_current_command} #{pane_current_path} | #h %Y-%m-%d %H:%M ', 'session']
   ];
+  const commands = options.map(([key, value, scope]) => {
+    const target = scope === 'global' ? '-g' : `-t ${shellEscape(session)}`;
+    return `set-option ${target} ${key} ${shellEscape(value)}`;
+  });
+  try {
+    if (commands.length > 0) {
+      execSync(`tmux ${commands.join(' \\; ')}`);
+      return;
+    }
+  } catch {
+    // Fall back to per-option updates to preserve behavior on older tmux versions.
+  }
   options.forEach(([key, value, scope]) => {
     try {
-      const target = scope === 'global' ? '-g' : `-t ${session}`;
+      const target = scope === 'global' ? '-g' : `-t ${shellEscape(session)}`;
       execSync(`tmux set-option ${target} ${key} ${shellEscape(value)}`);
     } catch {
       // Ignore tmux styling failures to avoid blocking session creation.
@@ -358,7 +478,7 @@ function configureScreenScrollback(session: string) {
   const commands = [`defscrollback ${scrollback}`, `scrollback ${scrollback}`];
   commands.forEach(command => {
     try {
-      execSync(`screen -S ${session} -X ${command}`);
+      execSync(`screen -S ${shellEscape(session)} -X ${command}`);
     } catch {
       // Ignore screen scrollback failures to avoid blocking session creation.
     }
@@ -378,8 +498,12 @@ function getToolPrefix(command: string): string {
   return cleaned || 'tool';
 }
 
-function getSessionGroupName(session: string): GroupKey {
-  const match = /^(.+)-([a-z0-9]+)$/i.exec(session);
+function getSessionGroupName(session: string, knownGroups: GroupKey[] = []): GroupKey {
+  const lowered = session.toLowerCase();
+  for (const group of knownGroups) {
+    if (lowered.startsWith(`${group}-`)) return group;
+  }
+  const match = /^(.+)-([a-z0-9-]+)$/i.exec(session);
   return match?.[1]?.toLowerCase() || 'terminal';
 }
 
@@ -430,8 +554,8 @@ export function activate(context: vscode.ExtensionContext) {
       prompt: `Will be prefixed with ${prefix}-`
     });
     if (suffix === undefined) return;
-    const cleaned = suffix.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8);
-    const session = cleaned ? `${prefix}-${cleaned}` : getNextSessionName(prefix);
+    const cleaned = sanitizeSessionName(suffix);
+    const session = cleaned ? buildSessionName(prefix, cleaned) : await getNextSessionName(prefix);
     try {
       const cwd = getPreferredCwd();
       const envFile = getValidatedEnvFile();

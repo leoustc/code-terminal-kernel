@@ -124,6 +124,11 @@
           "type": "string",
           "default": "",
           "description": "Path to a shell file to source when starting a new session."
+        },
+        "terminalKernel.tmuxMouse": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable tmux mouse mode. When on, tmux captures selection and can interfere with VS Code text selection."
         }
       }
     }
