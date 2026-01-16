@@ -56,6 +56,7 @@ package:
 		echo "vsce not installed. Run: npm install"; \
 		exit 1; \
 	fi
+	@node -e "const fs=require('fs'); const name=fs.readFileSync('$(NAME_FILE)','utf8').trim(); const v=fs.readFileSync('$(VERSION_FILE)','utf8').trim(); const path='$(PKG_JSON)'; const pkg=JSON.parse(fs.readFileSync(path,'utf8')); let changed=false; if (pkg.name!==name) { pkg.name=name; changed=true; } if (pkg.version!==v) { pkg.version=v; changed=true; } if (changed) { fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n'); }"
 	$(TSC) -p ./
 	@out_dir="$(OUT_DIR)"; \
 	base=$$(node -e "const pkg=require('./$(PKG_JSON)'); console.log(pkg.name + '-' + pkg.version + '.vsix');"); \

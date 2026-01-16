@@ -13,6 +13,7 @@ const SESSION_CACHE_TTL_MS = 500;
 const SESSION_NAME_MAX = 24;
 
 let bundledTools: string[] = [];
+const sessionTerminals = new Map<string, Set<vscode.Terminal>>();
 
 class TerminalItem extends vscode.TreeItem {
   constructor(public readonly session: string) {
@@ -530,7 +531,47 @@ function connectToSession(session: string) {
     shellArgs: ['-c', attachSessionCommand(session)],
     cwd
   });
+  trackSessionTerminal(session, term);
   term.show();
+}
+
+function trackSessionTerminal(session: string, term: vscode.Terminal) {
+  const existing = sessionTerminals.get(session);
+  if (existing) {
+    existing.add(term);
+    return;
+  }
+  sessionTerminals.set(session, new Set([term]));
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function discoverSessionTerminals(session: string): vscode.Terminal[] {
+  const escaped = escapeRegExp(session);
+  const suffixPattern = new RegExp(`^${escaped}(\\s|\\()`);
+  return vscode.window.terminals.filter(
+    term => term.name === session || suffixPattern.test(term.name)
+  );
+}
+
+function getTrackedSessionTerminals(session: string): vscode.Terminal[] {
+  const tracked = sessionTerminals.get(session);
+  if (tracked && tracked.size > 0) {
+    return Array.from(tracked);
+  }
+  const discovered = discoverSessionTerminals(session);
+  discovered.forEach(term => trackSessionTerminal(session, term));
+  return discovered;
+}
+
+function clearSessionFrontends(session: string) {
+  const tracked = getTrackedSessionTerminals(session);
+  if (tracked.length === 0) {
+    return;
+  }
+  tracked.forEach(term => term.dispose());
 }
 
 function getValidatedEnvFile(): string | null | undefined {
@@ -579,6 +620,13 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('terminalKernel.connectSession', async (item: TerminalItem) => {
       if (!item?.session) return;
       connectToSession(item.session);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('terminalKernel.showSession', async (item: TerminalItem) => {
+      if (!item?.session) return;
+      clearSessionFrontends(item.session);
     })
   );
 
@@ -637,6 +685,17 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeConfiguration(event => {
       if (!event.affectsConfiguration('terminalKernel.tools')) return;
       provider.refresh();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.window.onDidCloseTerminal(term => {
+      sessionTerminals.forEach((terminals, session) => {
+        if (!terminals.delete(term)) return;
+        if (terminals.size === 0) {
+          sessionTerminals.delete(session);
+        }
+      });
     })
   );
 }
