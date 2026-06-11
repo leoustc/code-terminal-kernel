@@ -76,6 +76,10 @@
         "title": "Clear Filter"
       },
       {
+        "command": "terminalKernel.openVnc",
+        "title": "Open VNC"
+      },
+      {
         "command": "terminalKernel.refresh",
         "title": "Refresh"
       }
@@ -86,6 +90,12 @@
           "command": "terminalKernel.refresh",
           "when": "view == terminalKernelSessions",
           "group": "navigation"
+        },
+        {
+          "command": "terminalKernel.openVnc",
+          "when": "view == terminalKernelSessions",
+          "group": "navigation@1",
+          "icon": "$(vm)"
         },
         {
           "command": "terminalKernel.setFilter",
@@ -184,6 +194,11 @@
           "type": "boolean",
           "default": false,
           "description": "Close all attached front-end terminals for known sessions when VS Code exits."
+        },
+        "terminalKernel.noVncUrl": {
+          "type": "string",
+          "default": "",
+          "description": "URL to a noVNC page (e.g. http://localhost:6080/vnc.html) opened inside VS Code."
         }
       }
     }

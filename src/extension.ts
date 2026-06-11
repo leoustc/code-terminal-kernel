@@ -15,12 +15,14 @@ const FAVORITES_GROUP = 'favorites';
 const FAVORITES_KEY = 'terminalKernel.favorites';
 const FILTER_KEY = 'terminalKernel.sessionFilter';
 const SESSION_DRAG_MIME = 'application/vnd.code.tree.terminalKernelSessions';
+const VNC_PANEL_ID = 'terminalKernelVnc';
 
 let bundledTools: string[] = [];
 let favoriteSessions = new Set<string>();
 let sessionFilter = '';
 let extensionContext: vscode.ExtensionContext | undefined;
 let sessionTreeView: vscode.TreeView<TerminalItem | GroupItem> | undefined;
+let vncPanel: vscode.WebviewPanel | undefined;
 const knownSessions = new Set<string>();
 const sessionTerminals = new Map<string, Set<vscode.Terminal>>();
 
@@ -229,6 +231,10 @@ function getAutoCloseFrontends(): boolean {
   return vscode.workspace
     .getConfiguration('terminalKernel')
     .get<boolean>('autoCloseFrontends', false);
+}
+
+function getNoVncUrl(): string {
+  return vscode.workspace.getConfiguration('terminalKernel').get<string>('noVncUrl', '').trim();
 }
 
 function discoverBundledTools(toolsDir: string): string[] {
@@ -669,10 +675,8 @@ function escapeRegExp(value: string): string {
 
 function discoverSessionTerminals(session: string): vscode.Terminal[] {
   const escaped = escapeRegExp(session);
-  const suffixPattern = new RegExp(`^${escaped}(\\s|\\()`);
-  return vscode.window.terminals.filter(
-    term => term.name === session || suffixPattern.test(term.name)
-  );
+  const exactOrDup = new RegExp(`^${escaped}( \\(\\d+\\))?$`);
+  return vscode.window.terminals.filter(term => exactOrDup.test(term.name));
 }
 
 function getTrackedSessionTerminals(session: string): vscode.Terminal[] {
@@ -698,6 +702,55 @@ function closeKnownSessionFrontends() {
   sessions.forEach(session => {
     discoverSessionTerminals(session).forEach(term => term.dispose());
   });
+}
+
+function getVncHtml(noVncUrl: string): string {
+  const escapedUrl = noVncUrl.replace(/"/g, '&quot;');
+  const nonce = String(Math.random()).slice(2);
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src http: https:; style-src 'nonce-${nonce}';" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VNC</title>
+  <style nonce="${nonce}">
+    html, body, iframe { height: 100%; width: 100%; margin: 0; padding: 0; border: 0; background: #111; }
+  </style>
+</head>
+<body>
+  <iframe src="${escapedUrl}" allow="fullscreen"></iframe>
+</body>
+</html>`;
+}
+
+async function openVncPanel() {
+  let url = getNoVncUrl();
+  if (!url) {
+    const value = await vscode.window.showInputBox({
+      prompt: 'noVNC URL (e.g. http://localhost:6080/vnc.html)',
+      placeHolder: 'http://localhost:6080/vnc.html'
+    });
+    if (value === undefined) return;
+    url = value.trim();
+    if (!url) return;
+    vscode.workspace.getConfiguration('terminalKernel').update('noVncUrl', url, true);
+  }
+
+  if (vncPanel) {
+    vncPanel.reveal(vscode.ViewColumn.Active);
+    vncPanel.webview.html = getVncHtml(url);
+    return;
+  }
+
+  vncPanel = vscode.window.createWebviewPanel(VNC_PANEL_ID, 'VNC', vscode.ViewColumn.Active, {
+    enableScripts: true,
+    retainContextWhenHidden: true
+  });
+  vncPanel.onDidDispose(() => {
+    vncPanel = undefined;
+  });
+  vncPanel.webview.html = getVncHtml(url);
 }
 
 function getValidatedEnvFile(): string | null | undefined {
@@ -821,6 +874,12 @@ export function activate(context: vscode.ExtensionContext) {
       if (!getSessionFilter()) return;
       setSessionFilter('');
       provider.refresh();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('terminalKernel.openVnc', async () => {
+      await openVncPanel();
     })
   );
 
