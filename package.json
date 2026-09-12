@@ -5,7 +5,7 @@
   "displayName": "Terminal Kernel",
   "description": "Create, reuse, and manage persistent terminals from VS Code.",
   "icon": "media/terminal.png",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/leoustc/code-terminal-kernel.git"
@@ -13,9 +13,7 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "activationEvents": [
-    "*"
-  ],
+  "activationEvents": [],
   "main": "./out/extension.js",
   "categories": [
     "Other"
@@ -41,47 +39,56 @@
     "commands": [
       {
         "command": "terminalKernel.newSession",
-        "title": "New"
-      },
-      {
-        "command": "terminalKernel.newGroupSession",
-        "title": "  New  "
+        "title": "New Terminal",
+        "icon": "$(add)"
       },
       {
         "command": "terminalKernel.connectSession",
         "title": "Connect to Terminal"
       },
       {
+        "command": "terminalKernel.connectRemote",
+        "title": "Connect via SSH"
+      },
+      {
         "command": "terminalKernel.addFavorite",
-        "title": "Favorite"
+        "title": "Favorite",
+        "icon": "$(star)"
       },
       {
         "command": "terminalKernel.removeFavorite",
-        "title": "Unfavorite"
+        "title": "Unfavorite",
+        "icon": "$(star-full)"
       },
       {
         "command": "terminalKernel.showSession",
-        "title": "Clear"
+        "title": "Clear",
+        "icon": "$(clear-all)"
       },
       {
         "command": "terminalKernel.deleteSession",
-        "title": "Delete"
+        "title": "Delete",
+        "icon": "$(close)"
       },
       {
         "command": "terminalKernel.setFilter",
-        "title": "Filter Sessions"
+        "title": "Filter Sessions",
+        "icon": "$(filter)"
       },
       {
         "command": "terminalKernel.clearFilter",
-        "title": "Clear Filter"
-      },
-      {
-        "command": "terminalKernel.openVnc",
-        "title": "Open VNC"
+        "title": "Clear Filter",
+        "icon": "$(clear-all)"
       },
       {
         "command": "terminalKernel.refresh",
-        "title": "Refresh"
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "terminalKernel.openSettings",
+        "title": "Terminal Kernel Settings",
+        "icon": "$(gear)"
       }
     ],
     "menus": {
@@ -89,33 +96,29 @@
         {
           "command": "terminalKernel.refresh",
           "when": "view == terminalKernelSessions",
-          "group": "navigation"
-        },
-        {
-          "command": "terminalKernel.openVnc",
-          "when": "view == terminalKernelSessions",
-          "group": "navigation@1",
-          "icon": "$(vm)"
+          "group": "navigation@1"
         },
         {
           "command": "terminalKernel.setFilter",
-          "when": "view == terminalKernelSessions",
-          "group": "navigation@2",
-          "icon": "$(filter)"
+          "when": "view == terminalKernelSessions && !terminalKernel.filterActive",
+          "group": "navigation@2"
         },
         {
           "command": "terminalKernel.clearFilter",
           "when": "view == terminalKernelSessions && terminalKernel.filterActive",
-          "group": "navigation@3",
-          "icon": "$(clear-all)"
+          "group": "navigation@2"
+        },
+        {
+          "command": "terminalKernel.openSettings",
+          "when": "view == terminalKernelSessions",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
         {
-          "command": "terminalKernel.newGroupSession",
+          "command": "terminalKernel.newSession",
           "when": "view == terminalKernelSessions && viewItem == terminalGroup",
-          "group": "inline@1",
-          "icon": "$(add)"
+          "group": "inline@1"
         },
         {
           "command": "terminalKernel.connectSession",
@@ -125,26 +128,22 @@
         {
           "command": "terminalKernel.addFavorite",
           "when": "view == terminalKernelSessions && viewItem == terminalSession",
-          "group": "inline@1",
-          "icon": "$(star)"
+          "group": "inline@1"
         },
         {
           "command": "terminalKernel.removeFavorite",
           "when": "view == terminalKernelSessions && viewItem == terminalSessionFavorite",
-          "group": "inline@1",
-          "icon": "$(star-full)"
+          "group": "inline@1"
         },
         {
           "command": "terminalKernel.showSession",
           "when": "view == terminalKernelSessions && (viewItem == terminalSession || viewItem == terminalSessionFavorite)",
-          "group": "inline@2",
-          "icon": "$(clear-all)"
+          "group": "inline@2"
         },
         {
           "command": "terminalKernel.deleteSession",
           "when": "view == terminalKernelSessions && (viewItem == terminalSession || viewItem == terminalSessionFavorite)",
-          "group": "inline@6",
-          "icon": "$(close)"
+          "group": "inline@6"
         }
       ]
     },
@@ -160,45 +159,10 @@
           ],
           "description": "Backend used for terminal sessions."
         },
-        "terminalKernel.shell": {
-          "type": "string",
-          "default": "bash",
-          "enum": [
-            "bash",
-            "sh"
-          ],
-          "description": "Shell used to launch terminal sessions."
-        },
-        "terminalKernel.tools": {
-          "type": "array",
-          "default": [
-            "codex"
-          ],
-          "items": {
-            "type": "string",
-            "description": "Path to the command to run when starting a tool session."
-          },
-          "description": "Tool command paths to run when tmux/screen starts a session, plus any executables bundled in the extension's tools/ folder. The sidebar shows the basename."
-        },
-        "terminalKernel.preloadEnvFile": {
-          "type": "string",
-          "default": "",
-          "description": "Path to a shell file to source when starting a new session."
-        },
         "terminalKernel.tmuxMouse": {
           "type": "boolean",
           "default": false,
           "description": "Enable tmux mouse mode. When on, tmux captures selection and can interfere with VS Code text selection."
-        },
-        "terminalKernel.autoCloseFrontends": {
-          "type": "boolean",
-          "default": false,
-          "description": "Close all attached front-end terminals for known sessions when VS Code exits."
-        },
-        "terminalKernel.noVncUrl": {
-          "type": "string",
-          "default": "",
-          "description": "URL to a noVNC page (e.g. http://localhost:6080/vnc.html) opened inside VS Code."
         }
       }
     }
@@ -206,6 +170,7 @@
   "scripts": {
     "vscode:prepublish": "npx tsc -p ./",
     "compile": "npx tsc -p ./",
+    "test": "npm run compile && node --test test/*.test.js",
     "watch": "npx tsc -watch -p ./"
   },
   "devDependencies": {

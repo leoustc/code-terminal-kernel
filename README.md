@@ -1,55 +1,58 @@
 # Terminal Kernel
 
-Terminal Kernel lets you create and reuse persistent terminals from VS Code.
+Terminal Kernel lets you create, reuse, and manage persistent terminal sessions from VS Code.
 
-Features:
-- `codexinbox`: run Codex in a hardened Docker container with restricted filesystem access (only the current working directory and its subfolders are writable).
+## Features
 
-Usage:
-- Click the Terminal Kernel icon in the Activity Bar
-- Sessions are grouped by tool name; the default group is `Terminal`
-- Use the `New` button on a group row to create a session for that tool
-- Optionally enter a suffix (names become `<group>-<suffix>`, max 8 chars; non-alphanumeric characters are removed)
-- Click a session row to connect
-- Hover a session row and click the X to delete
-- Use Refresh in the view header when needed
+- Persistent sessions backed by `tmux` or `screen`.
+- Fast access from a dedicated Activity Bar view.
+- Favorites, filtering, refresh, and session cleanup controls.
+- Automatic discovery of sessions created outside the extension.
+- Direct backend attachment using the user's configured default shell.
+- SSH connections from aliases in the local `~/.ssh/config` file.
 
-Defaults:
-- If no suffix is provided, sessions are named `terminal-1`, `terminal-2`, ...
-- tmux sessions enable mouse scrolling for easier scrollback.
-- screen sessions set a 10,000-line scrollback buffer (use `Ctrl-a [` to scroll).
-- Sessions are persistent and survive VS Code reloads until you delete them.
+## Session groups
 
-Troubleshooting:
-- If sessions do not start, ensure the selected backend (`tmux` or `screen`) is installed and available on your PATH.
-- If a tool session does not start, verify the tool path in `terminalKernel.tools` is correct and executable.
+- **Favorites** contains favorited sessions.
+- **Terminal** contains sessions named `terminal-*`, including sessions created by the extension.
+- **Remote** contains concrete host aliases from the local SSH configuration.
+- **Other** contains every other session discovered from the selected backend and remains at the bottom of the sidebar.
 
-Settings:
+A favorite also remains visible in its Terminal or Other group.
+
+## Usage
+
+1. Click the Terminal Kernel icon in the Activity Bar.
+2. Use the add icon on the Terminal group to create a session.
+3. Optionally enter a suffix. Without one, sessions are named `terminal-1`, `terminal-2`, and so on.
+4. Click a session to connect.
+5. Use the inline actions to favorite, clear the attached VS Code terminal, or delete the persistent session.
+
+Select a host in Remote to open `ssh <alias>` in an integrated terminal. SSH options configured for that alias, including its user, port, identity file, and jump host, are applied by the local SSH client. Wildcard and negated `Host` patterns are not shown.
+
+The sidebar header provides icon actions for Refresh, Filter or Clear Filter, and Settings.
+
+## Settings
+
 - `terminalKernel.backend`: choose `tmux` (default) or `screen`.
-- `terminalKernel.shell`: choose `bash` (default) or `sh`.
-- `terminalKernel.preloadEnvFile`: path to a shell file to source when starting a new session.
-- `terminalKernel.noVncUrl`: URL to a noVNC page to open inside VS Code (use the `Open VNC` button in the view header).
-- `terminalKernel.tools`: list of tool command paths (executables only, no arguments); the sidebar uses the command basename as the group name.
-  - Add or remove tool entries in the VS Code Settings UI to control which groups appear in the sidebar.
-  - Executables shipped in the extension's `tools/` folder are auto-included and appear before custom entries.
+- `terminalKernel.tmuxMouse`: enable tmux mouse mode. It is disabled by default so VS Code text selection continues to work normally.
 
-Built-in tools:
-- `codexinbox`: launches Codex in a container with restricted filesystem access.
-  - Requires Docker installed and available on your PATH.
-  - Runs `docker.io/leoustc/codex:latest` with dropped capabilities and no new privileges.
-  - Mounts the current working directory (and subfolders) read-write; other host paths are not mounted except optional Codex config/SSH mounts.
+Use the gear icon in the sidebar header to open these settings.
 
-Tools example (`settings.json`):
-```json
-{
-  "terminalKernel.tools": [
-    "/usr/local/bin/codex",
-    "/usr/bin/python3",
-    "/opt/homebrew/bin/node"
-  ]
-}
-```
+## Backend behavior
 
-Requires `tmux` or `screen` installed on the system (based on the backend setting). `codexinbox` also requires Docker.
+- New sessions start in the active editor's workspace, or the first workspace folder when no file editor is active.
+- The selected backend starts its configured default shell.
+- tmux sessions show a compact status line, and the mouse setting applies only to sessions created by Terminal Kernel.
+- screen sessions use a 10,000-line scrollback buffer. Press `Ctrl-a [` to enter screen scrollback mode.
+- Sessions survive VS Code reloads until they are explicitly deleted.
+
+## Requirements
+
+Install `tmux` or `screen` and make the selected backend available on `PATH`. Remote connections also require the `ssh` client and `~/.ssh/config`.
+
+## Troubleshooting
+
+If sessions do not appear or start, confirm that `terminalKernel.backend` matches an installed backend, then use the Refresh icon in the sidebar header.
 
 License: GPL v2

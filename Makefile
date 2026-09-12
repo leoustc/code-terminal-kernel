@@ -21,7 +21,7 @@ save:
 	fi
 
 push:
-	git push --force origin "$(BRANCH)"
+	git push origin "$(BRANCH)"
 
 tag:
 	@if [ -z "$(TAG)" ]; then \

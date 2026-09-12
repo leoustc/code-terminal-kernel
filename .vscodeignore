@@ -1,0 +1,15 @@
+.github/**
+.gitignore
+.vscodeignore
+Makefile
+NAME
+ROADMAP.md
+VERSION
+package-lock.json
+src/**
+test/**
+tmp/**
+tools/**
+tsconfig.json
+*.vsix
+*.tsbuildinfo
